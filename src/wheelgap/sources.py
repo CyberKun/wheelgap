@@ -173,6 +173,11 @@ class Source:
     pypi_only: bool = False
     # A project directory with pixi.lock as well as the lockfile that was picked: the pixi.lock, for a note.
     passed_over: Path | None = None
+    # Package names on the command line: the requirements as typed, for --deps.
+    specs: list[str] = field(default_factory=list)
+    # --deps (deps.py): per target, the packages installed and the dependency path to each, keyed by index into
+    # `packages`. check() uses it in place of a lockfile's graph.
+    deps_paths: dict[Target, dict[int, list[str]]] | None = None
 
 
 def pythons_outside_lock(source: Source, targets: Iterable[Target], *, bounds_only: bool = True) -> list[str]:
@@ -1983,6 +1988,7 @@ def load_inputs(inputs: list[str], environment: str | None = None) -> list[Sourc
             raise SourceError(f"{item}: no such file")
         else:
             adhoc.packages.append(requirement_to_package(item, "command line"))
+            adhoc.specs.append(item)
     if adhoc.packages:
         sources.append(adhoc)
     if environment is not None and not any(s.kind == "pixi" for s in sources):

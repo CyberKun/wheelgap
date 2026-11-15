@@ -764,14 +764,17 @@ def check(sources: list[Source], targets: list[Target]) -> list[Row]:
     rows: list[Row] = []
     for source in sources:
         paths: dict[Target, dict[int, list[str]]] = {target: {} for target in targets}
-        installed = (
-            {
+        installed: dict[Target, dict[int, Parent]] | dict[Target, dict[int, list[str]]] | None
+        if source.deps_paths is not None:  # --deps: resolved per target already
+            paths = {t: source.deps_paths.get(t, {}) for t in targets}
+            installed = paths
+        elif source.edges is not None:
+            installed = {
                 t: _uv_reachable(source, t, paths[t]) if source.uv_selection is not None else reachable(source, t)
                 for t in targets
             }
-            if source.edges is not None
-            else None
-        )
+        else:
+            installed = None
         for i, pkg in enumerate(source.packages):
             if pkg.skip:
                 continue
@@ -801,7 +804,9 @@ def check(sources: list[Source], targets: list[Target]) -> list[Row]:
                 )
                 if needed and installed is not None:
                     row.via[t] = (
-                        paths[t][i] if source.uv_selection is not None else dependency_path(source, installed[t], i)
+                        paths[t][i]
+                        if source.uv_selection is not None or source.deps_paths is not None
+                        else dependency_path(source, installed[t], i)  # type: ignore[arg-type]
                     )
             rows.extend(resolved_rows.values())
     return rows

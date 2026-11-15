@@ -25,6 +25,7 @@ from . import suggest as release_suggest
 from .api import running_python
 from .build import BuildInfo, describe, lookup_all, requires_for, shown
 from .check import CELL, EXPLAIN_LIMIT, Row, Status, check, explain, explain_lines, marker_holds, reachable
+from .deps import Resolver, resolve_deps
 from .dockerfile import DockerfileError, read_dockerfile
 from .github import github_annotations
 from .junit import write_junit
@@ -232,6 +233,12 @@ def make_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="with --explain, also say when conda-forge has a package of the same name with builds for a gap's "
         "platform (sends the names of PyPI packages with gaps to anaconda.org)",
+    )
+    p.add_argument(
+        "--deps",
+        action="store_true",
+        help="for package names on the command line, also check what they install, resolved per target from "
+        "PyPI's metadata (looks each dependency up on pypi.org; a lockfile is exact)",
     )
     p.add_argument(
         "--suggest",
@@ -1623,6 +1630,25 @@ def _main(argv: list[str]) -> int:
                 poetry=bool(from_cli or args.only_group) or group_names is not None or extra_names is not None,
                 pdm=bool(from_cli or args.only_group) or group_names is not None,
             )
+        if args.deps:
+            adhoc = [s for s in sources if s.specs]
+            if not adhoc:
+                raise SourceError(
+                    "--deps applies to package names on the command line (wheelgap --deps mcp); "
+                    "a lockfile already lists what it installs"
+                )
+            if offline:
+                raise SourceError(
+                    f"{offline_how}: --deps would look packages up on PyPI; drop --deps, or {undo_offline(offline_how)}"
+                )
+            if index_url is not None:
+                raise SourceError(
+                    "--deps reads dependencies from PyPI's JSON API, which a simple index (--index-url, or "
+                    "index-url in [tool.wheelgap]) doesn't have"
+                )
+            resolver = Resolver()
+            for source in adhoc:
+                resolve_deps(source, targets, resolver)
         if offline:
             require_offline(sources, offline_how, simple_index=index_url)
             if args.conda_forge:
@@ -1658,6 +1684,14 @@ def _main(argv: list[str]) -> int:
         print(f"wheelgap: error: {type(e).__name__}: {e}", file=sys.stderr)
         return input_error_json(e) if args.json else 2
 
+    if args.deps and not quiet:
+        count = len({p.key for s in sources if s.deps_paths is not None for p in s.packages if not p.skip})
+        print(
+            f"wheelgap: note: --deps resolved {count} package{'s' if count != 1 else ''} from PyPI's metadata, "
+            "taking the newest release that meets every constraint on each target; a lockfile (uv lock, "
+            "pip-compile) is exact",
+            file=sys.stderr,
+        )
     if not quiet:
         note_unpinned_requirements(sources)
         for source in sources:

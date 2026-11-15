@@ -1,0 +1,253 @@
+"""--deps: what the package names on the command line install, read from PyPI's metadata (#353).
+
+For each target, a small resolver picks a release the way pip does without backtracking: for each requirement, the
+newest release that meets every constraint on it, supports the target's Python and isn't yanked (a yanked release
+only for an exact `==` pin). It follows markers and extras as pip evaluates them on that target, so a dependency
+that only Windows installs is only checked on Windows targets, and `pyjwt[crypto]` brings in cryptography while
+`pyjwt` doesn't.
+
+It isn't pip's resolver, so it refuses rather than guesses. When a later constraint rules out a release it already
+picked, it starts that target again with the constraint known from the start. A constraint it learned that the
+finished tree doesn't impose is dropped and the tree resolved again, so a learned constraint never holds a package
+back. If the constraints on a package can't all be met, or the rounds go in a circle, it's a DepsError: check a
+lockfile instead.
+
+The answer per target is which packages are installed and the dependency path to each (Source.deps_paths); check()
+uses it in place of a lockfile's graph. Each release picked becomes a Package with no files, for fill_all to look up.
+"""
+
+from __future__ import annotations
+
+from collections import deque
+from dataclasses import dataclass, field
+from urllib.parse import quote
+
+from packaging.requirements import InvalidRequirement, Requirement
+from packaging.specifiers import SpecifierSet
+from packaging.utils import canonicalize_name
+from packaging.version import InvalidVersion, Version
+
+from . import pypi
+from .check import marker_holds
+from .sources import Package, Source, SourceError
+from .targets import Target
+
+MAX_ROUNDS = 50  # restarts per target before giving up
+MAX_PACKAGES = 2000  # in one target's tree: past this, something is wrong
+
+
+class DepsError(SourceError):
+    """The requirements can't be resolved without a resolver that backtracks, or not at all."""
+
+
+@dataclass
+class _Conflict:
+    key: str
+    spec: str
+
+
+@dataclass
+class _Tree:
+    chosen: dict[str, str] = field(default_factory=dict)  # key -> version
+    errors: dict[str, str] = field(default_factory=dict)  # key -> why it has no version
+    paths: dict[str, list[str]] = field(default_factory=dict)  # key -> names from a top-level requirement down
+    imposed: dict[str, set[str]] = field(default_factory=dict)  # key -> specifiers on it from installed edges
+
+
+class Resolver:
+    """Resolves requirements per target. Index answers are kept for the run, so later targets cost no requests."""
+
+    def __init__(self) -> None:
+        self._projects: dict[str, dict | Exception] = {}
+        self._requires: dict[tuple[str, str], list[Requirement] | Exception] = {}
+        self.names: dict[str, str] = {}  # key -> the name the index gives it
+
+    def _project(self, key: str) -> dict:
+        if key not in self._projects:
+            try:
+                data = pypi.fetch_json(f"{pypi.index_url()}/{quote(key)}/json", max_bytes=pypi.RELEASES_MAX_BYTES)
+                if not isinstance(data, dict) or not isinstance(data.get("releases"), dict):
+                    raise ValueError("the index gave no release list")
+                info = data.get("info")
+                if isinstance(info, dict) and isinstance(info.get("name"), str):
+                    self.names.setdefault(key, info["name"])
+                self._projects[key] = data
+            except Exception as e:  # reported on the package, as for any lookup
+                self._projects[key] = e
+        found = self._projects[key]
+        if isinstance(found, Exception):
+            raise found
+        return found
+
+    def requires(self, key: str, version: str) -> list[Requirement]:
+        """The release's Requires-Dist, from its own JSON page."""
+        if (key, version) not in self._requires:
+            try:
+                data = pypi.fetch_json(f"{pypi.index_url()}/{quote(key)}/{quote(version)}/json")
+                info = data.get("info") if isinstance(data, dict) else None
+                if not isinstance(info, dict):
+                    raise ValueError("the index gave no release metadata")
+                listed = info.get("requires_dist")
+                if listed is None:
+                    urls = data.get("urls")
+                    wheels = isinstance(urls, list) and any(
+                        isinstance(u, dict) and str(u.get("filename", "")).endswith(".whl") for u in urls
+                    )
+                    if not wheels:
+                        # PyPI reads Requires-Dist from the first file uploaded; an old sdist's metadata may leave
+                        # them out even when setup.py has some, so "none" can't be trusted.
+                        raise ValueError("PyPI lists no dependencies for it and it has no wheel to confirm that")
+                    listed = []
+                if not isinstance(listed, list) or not all(isinstance(r, str) for r in listed):
+                    raise ValueError("the index gave dependencies that aren't a list of strings")
+                self._requires[(key, version)] = [Requirement(r) for r in listed]
+            except InvalidRequirement as e:
+                self._requires[(key, version)] = ValueError(f"a dependency doesn't parse: {e}")
+            except Exception as e:
+                self._requires[(key, version)] = e
+        found = self._requires[(key, version)]
+        if isinstance(found, Exception):
+            raise found
+        return found
+
+    def pick(self, key: str, specs: list[str], python: str) -> str | None:
+        """The newest release meeting every specifier, with a file that isn't yanked and supports `python`. An exact
+        `==` pin may pick a yanked release, as pip does."""
+        releases = self._project(key)["releases"]
+        exact = {s.version for spec in specs for s in SpecifierSet(spec) if s.operator in ("==", "===")}
+        usable: dict[Version, str] = {}
+        for text, entries in releases.items():
+            try:
+                version = Version(text)
+                files = pypi._files(entries)
+            except (InvalidVersion, ValueError):
+                continue
+            pinned = text in exact or str(version) in exact
+            if any((pinned or not e.get("yanked")) and pypi._supports_python(e, python) for e in files):
+                usable[version] = text
+        combined = SpecifierSet(",".join(s for s in specs if s))
+        chosen = max(combined.filter(usable), default=None)
+        return usable[chosen] if chosen is not None else None
+
+    def _round(self, roots: list[Requirement], target: Target, learned: dict[str, set[str]]) -> _Tree | _Conflict:
+        python = f"{target.major}.{target.minor}"
+        tree = _Tree()
+        extras: dict[str, frozenset[str]] = {}
+        queue: deque[tuple[Requirement, frozenset[str], list[str]]] = deque((r, frozenset(), []) for r in roots)
+        while queue:
+            req, parent_extras, path = queue.popleft()
+            if req.marker is not None and not marker_holds(str(req.marker), target, extras=parent_extras):
+                continue
+            key = canonicalize_name(req.name)
+            spec = str(req.specifier)
+            tree.imposed.setdefault(key, set()).add(spec)
+            wanted = frozenset(canonicalize_name(e) for e in req.extras)
+            if key in tree.errors:
+                continue
+            if key in tree.chosen:
+                if spec and not SpecifierSet(spec).contains(tree.chosen[key], prereleases=True):
+                    return _Conflict(key, spec)
+                if wanted <= extras[key]:
+                    continue
+                extras[key] |= wanted  # newly asked-for extras: walk its dependencies again with them
+            else:
+                if req.url:
+                    tree.errors[key] = "a direct URL dependency: wheelgap can't check it"
+                    tree.paths[key] = [*path, req.name]
+                    continue
+                specs = sorted(tree.imposed[key] | learned.get(key, set()))
+                try:
+                    version = self.pick(key, specs, python)
+                except Exception as e:
+                    tree.errors[key] = _lookup_error(e)
+                    tree.paths[key] = [*path, self.names.get(key, req.name)]
+                    continue
+                if version is None:
+                    if key in learned:  # learned constraints and this one can't all be met
+                        raise DepsError(
+                            f"--deps: can't resolve {self.names.get(key, req.name)} for Python {python} on "
+                            f"{target.platform}: no release meets {', '.join(s or '(any)' for s in specs)}; a "
+                            "resolver that backtracks may find another way, so check a lockfile instead "
+                            "(uv lock, or pip-compile)"
+                        )
+                    shown = ", ".join(s for s in specs if s) or "any version"
+                    tree.errors[key] = f"no release matches {shown} for Python {python}"
+                    tree.paths[key] = [*path, self.names.get(key, req.name)]
+                    continue
+                tree.chosen[key] = version
+                extras[key] = wanted
+                tree.paths[key] = [*path, self.names.get(key, req.name)]
+                if len(tree.chosen) > MAX_PACKAGES:
+                    raise DepsError(f"--deps: more than {MAX_PACKAGES} packages; check a lockfile instead")
+            try:
+                requires = self.requires(key, tree.chosen[key])
+            except Exception as e:
+                tree.errors[key] = f"couldn't read its dependencies: {_lookup_error(e)}"
+                continue
+            queue.extend((r, extras[key], tree.paths[key]) for r in requires)
+        return tree
+
+    def resolve(self, roots: list[Requirement], target: Target) -> _Tree:
+        learned: dict[str, set[str]] = {}
+        seen: set[frozenset[tuple[str, str]]] = set()
+        for _ in range(MAX_ROUNDS):
+            state = frozenset((k, s) for k, specs in learned.items() for s in specs)
+            if state in seen:
+                break
+            seen.add(state)
+            out = self._round(roots, target, learned)
+            if isinstance(out, _Conflict):
+                learned.setdefault(out.key, set()).add(out.spec)
+                continue
+            # A learned constraint the finished tree doesn't impose would hold a package back: drop it, go again.
+            unused = {(k, s) for k, specs in learned.items() for s in specs if s not in out.imposed.get(k, set())}
+            if not unused:
+                return out
+            for k, s in unused:
+                learned[k].discard(s)
+            learned = {k: specs for k, specs in learned.items() if specs}
+        raise DepsError(
+            f"--deps: can't settle on releases for Python {target.major}.{target.minor} on {target.platform} "
+            "without a resolver that backtracks; check a lockfile instead (uv lock, or pip-compile)"
+        )
+
+
+def _lookup_error(e: Exception) -> str:
+    code = getattr(e, "code", None)
+    if code == 404:
+        return "not on index"
+    if code is not None:
+        return f"HTTP {code}"
+    if isinstance(e, ValueError):
+        return str(e)
+    return f"lookup failed ({type(e).__name__})"
+
+
+def resolve_deps(source: Source, targets: list[Target], resolver: Resolver | None = None) -> None:
+    """Replace a command-line source's packages with what its requirements install on each target."""
+    resolver = resolver or Resolver()
+    roots = [Requirement(text) for text in source.specs]
+    kept = [p for p in source.packages if p.skip]  # a name @ URL: nothing to look up, as without --deps
+    roots = [r for r in roots if not r.url]
+    packages: list[Package] = list(kept)
+    index: dict[tuple[str, str | None, str | None], int] = {}
+    deps_paths: dict[Target, dict[int, list[str]]] = {}
+    for target in targets:
+        tree = resolver.resolve(roots, target)
+        reach: dict[int, list[str]] = {}
+        for key, path in tree.paths.items():
+            version, error = tree.chosen.get(key), tree.errors.get(key)
+            if version is None and error is None:
+                continue
+            ident = (key, version, None if version else error)
+            if ident not in index:
+                name = resolver.names.get(key, path[-1])
+                index[ident] = len(packages)
+                packages.append(Package(name, version, error=error if version is None else None, origin="--deps"))
+            i = index[ident]
+            if version is not None and error is not None:
+                packages[i].error = error  # its dependencies couldn't be read: unknown, not a clean bill
+            reach[i] = path
+        deps_paths[target] = reach
+    source.packages = packages
+    source.deps_paths = deps_paths

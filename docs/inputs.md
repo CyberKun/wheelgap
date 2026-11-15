@@ -20,7 +20,7 @@ wheelgap psycopg2 numpy==2.3.4    # package names, with or without a version
 | [`pixi.lock`](#pixilock) | no | no |
 | [requirements files](#requirements-files) | no | no |
 | [`pyproject.toml`](#pyprojecttoml) | no | no |
-| [package names](#package-names) | no | no |
+| [package names](#package-names) | no | with `--deps` (after 0.10.0) |
 
 "Read without network" means the lockfile records every file published for each pinned version, so wheelgap
 needs no index lookup (except when its `requires-python` leaves out a Python you check; see
@@ -275,3 +275,11 @@ the newest matching release. An argument that is also the name of a file or dire
 directory, so pin the package to check it on PyPI instead (`wheelgap numpy==2.3.4`). The same goes for the subcommand
 names as the first argument: `wheelgap diff==2023.12.6` checks the PyPI package `diff`, and
 `wheelgap mcp==2.3.0` the package `mcp`.
+
+**After 0.10.0**, `--deps` also checks what the names install, which is where the gap usually is: `mcp` is pure Python,
+but on Windows on ARM `pip install mcp` compiles cryptography (`mcp → PyJWT → cryptography`). wheelgap resolves the
+tree for each target from PyPI's metadata, following markers and extras as pip evaluates them there, and takes the
+newest release that meets every constraint, supports that target's Python and isn't yanked. It isn't pip's resolver:
+when constraints only a backtracking resolver could untangle come up, it stops with an error instead of guessing, and a
+release whose dependencies it can't read is `unknown`. A lockfile from `uv lock` or `pip-compile` is exact, so prefer
+one when you have it. See [`--deps`](cli.md#deps).
