@@ -147,7 +147,8 @@ class Note:
 
 
 def _minutes(seconds: int) -> str:
-    return f"{seconds} s" if seconds < 90 else f"{round(seconds / 60)} min"
+    # Half a minute rounds up, as JavaScript's Math.round does on the tracker site, so both say the same.
+    return f"{seconds} s" if seconds < 90 else f"{(seconds + 30) // 60} min"
 
 
 @dataclass(frozen=True)

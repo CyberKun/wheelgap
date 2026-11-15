@@ -929,6 +929,7 @@ def test_build_lab_result_shown_for_the_checked_release_and_target(capsys, tmp_p
         ({"seconds": 89}, "builds from source in 89 s and imports"),
         ({"seconds": 90}, "builds from source in 2 min and imports"),
         ({"seconds": 1500}, "builds from source in 25 min and imports"),
+        ({"seconds": 150}, "builds from source in 3 min and imports"),  # as the tracker site says it
         ({**FT}, "builds from source in 87 s and imports, GIL stays off"),
         ({**FT, "gil": "re-enabled"}, "builds in 87 s, but importing it turns the GIL back on"),
         (
