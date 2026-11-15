@@ -257,7 +257,102 @@ def test_inspect_flags_a_drop_in_wheels_against_the_pinned_copy(tmp_path):
     )
     assert script.inspect(live).findings == []
     report = script.inspect(live, pinned=REAL / "pluggy/uv.lock")
-    assert report.of(MISREAD) == ["0.0 wheels per package, down from 11.6 in the pinned copy"]
+    assert "0.0 wheels per package, down from 11.6 in the pinned copy" in report.of(MISREAD)
+
+
+@pytest.mark.parametrize("file", sorted(EXPECTED))
+def test_inspect_against_its_own_pinned_copy_finds_nothing(file):
+    assert script.inspect(REAL / file, pinned=REAL / file).findings == []
+
+
+# Keys renamed to names the raw counts don't know (#264): each passes the counts, so only the pinned copy catches it.
+@pytest.mark.parametrize(
+    ("file", "old", "new", "findings"),
+    [
+        (
+            "pluggy/uv.lock",
+            "marker = ",
+            "when = ",
+            [
+                "0.0 markers per package, down from 0.2 in the pinned copy",
+                "0% of cells n/a, down from 13% in the pinned copy",
+            ],
+        ),
+        (
+            "pluggy/uv.lock",  # the project's root isn't found, so uv's graph has nowhere to start
+            'editable = "."',
+            'editable = "./"',
+            [
+                "21 packages, but wheelgap read no dependency graph",
+                "0.0 dependency edges per package, down from 1.2 in the pinned copy",
+                "0.0 markers per package, down from 0.2 in the pinned copy",
+                "0% of cells n/a, down from 13% in the pinned copy",
+            ],
+        ),
+        ("pluggy/uv.lock", "sdist = ", "source-dist = ", ["0.0 sdists per package, down from 1.0 in the pinned copy"]),
+        (
+            "pluggy/uv.lock",
+            "\nrequires-python = ",
+            "\npython-requires = ",
+            ["no requires-python read, but the pinned copy has '>=3.10'"],
+        ),
+        (
+            "cleo/poetry.lock",  # Poetry 1.x
+            "[package.dependencies]",
+            "[package.requires]",
+            [
+                "53 packages, but wheelgap read no dependency graph",
+                "0.0 dependency edges per package, down from 1.1 in the pinned copy",
+                "0.0 markers per package, down from 0.2 in the pinned copy",
+                "0% of cells n/a, down from 8% in the pinned copy",
+            ],
+        ),
+    ],
+)
+def test_inspect_flags_a_renamed_key_against_the_pinned_copy(tmp_path, file, old, new, findings):
+    live = tmp_path / Path(file).name
+    text = (REAL / file).read_text(encoding="utf-8")
+    assert old in text
+    live.write_text(text.replace(old, new), encoding="utf-8")
+    assert script.inspect(live, pinned=REAL / file).findings == [(MISREAD, f) for f in findings]
+
+
+def test_inspect_lets_poetry_drop_its_graph_with_a_warning():
+    # cleo's live lock moved from Poetry 1.x to lock-version 2.1, which records markers on packages, not edges.
+    report = script.inspect(REAL / "tomlkit/poetry.lock", pinned=REAL / "cleo/poetry.lock")
+    assert not [m for m in report.of(MISREAD) if "dependency" in m]
+    assert report.of(WARNING) == [
+        "lock-version '2.1', with no dependency graph: refreshing the pinned copy would lose the corpus's "
+        "Poetry 1.x lock (pick another project for it)"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("name", "text", "finding"),
+    [
+        (
+            "uv.lock",  # two packages and no root: no graph, so every package looks needed
+            UV_HEAD + UV_A + A_WHEEL + UV_A.replace('"a"', '"b"') + A_WHEEL,
+            "2 packages, but wheelgap read no dependency graph",
+        ),
+        (
+            "uv.lock",
+            UV_HEAD.replace('requires-python = ">=3.10"', "requires-python = 3.10") + UV_ROOT + UV_A + A_WHEEL,
+            "the file's requires-python is '3.1', but wheelgap read 'None'",
+        ),
+        (
+            "pylock.toml",
+            'requires-python = [">=3.10"]\n'
+            + PYLOCK_A
+            + '[[packages.wheels]]\nurl = "https://x/a-1.0-py3-none-any.whl"\n',
+            "the file's requires-python is \"['>=3.10']\", but wheelgap read 'None'",
+        ),
+    ],
+)
+def test_inspect_flags_a_missing_graph_or_requires_python(tmp_path, name, text, finding):
+    path = tmp_path / name
+    path.write_text(text, encoding="utf-8")
+    assert finding in script.inspect(path).of(MISREAD)
 
 
 @pytest.mark.parametrize("field", ["name", "version"])  # wheelgap refuses the name; the version gets printed
