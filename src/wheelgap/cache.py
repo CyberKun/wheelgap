@@ -177,13 +177,13 @@ def save_notes(source: str, name: str, notes: list[dict]) -> None:
 def load_lab(source: str, name: str) -> list | None:
     """--notes: a package's cached build lab results (see notes.py) from `source`, or None. An empty list is a cached
     404, or a file with none. notes.py checks each result again."""
-    builds = _load(source, name, "build-lab", "builds")  # "build-lab" is no version either
+    builds = _load(source, name, "build-lab-v1", "builds")  # versioned, so a later format is looked up again
     return builds if isinstance(builds, list) else None
 
 
 def save_lab(source: str, name: str, builds: list[dict]) -> None:
     """Store a package's build lab results, as notes.py checked them."""
-    _save(source, name, "build-lab", "builds", builds)
+    _save(source, name, "build-lab-v1", "builds", builds)
 
 
 def _save(index: str, name: str, version: str, key: str, value: object) -> None:

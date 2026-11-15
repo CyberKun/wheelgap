@@ -1046,6 +1046,11 @@ def test_build_lab_needs_a_known_version():
         build(version="1.0 "),
         build(outcome="built?"),
         build(outcome=None),
+        build(wheel="cp314-cp314-linux_x86_64"),  # a wheel for another platform than the target's
+        build(wheel="cp314-cp314-win_amd64"),
+        build(runner="ubuntu-24.04"),  # a runner that can't build for win-arm64
+        build(runner="windows-2025"),  # an x86-64 Windows runner
+        build(seconds=86400),  # longer than the lab ever runs a build
         build(seconds=True),
         build(seconds=-1),
         build(seconds=87.0),
@@ -1076,7 +1081,7 @@ def test_build_lab_needs_a_known_version():
         build(excerpt="caf\u00e9"),
         build(excerpt="line\nbreak"),
         build(excerpt="\x1b[31mred"),
-        build(excerpt="::error::injected"),
+        build(excerpt="##[error]injected"),  # the legacy workflow command form; "::" is fine (see below)
         build(excerpt="see ##[error]injected"),
         build(excerpt=None),
         build(toolchains=["gcc", "gcc"]),
@@ -1173,3 +1178,19 @@ def test_markdown_shows_build_lab_results(capsys, tmp_path, tracker):
     )
     assert code == 1 and not err
     assert f"\n{LAB}builds from source in 87 s and imports\n" in out.split("```")[1]
+
+
+@pytest.mark.parametrize(
+    "excerpt",
+    [
+        "error: no member named 'x' in 'std::vector<int>::iterator'",
+        "error: '::size_t' has not been declared",
+        "error[E0599]: no function `<T as Foo>::bar`",
+    ],
+)
+def test_a_compile_error_with_cpp_or_rust_paths_is_kept(excerpt):
+    # Real compiler errors are full of "::"; dropping them would hide exactly the failures the lab exists to report.
+    raw = build(**FAILED, excerpt=excerpt)
+    (result,) = notes.parse_builds({"schema": 1, "name": "pkg", "builds": [raw]}, "pkg")
+    assert result.excerpt == excerpt
+    assert result.reason == "needs a Rust toolchain"

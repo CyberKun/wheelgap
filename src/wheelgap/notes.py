@@ -93,12 +93,28 @@ REASONS = frozenset(
 TOOLCHAINS = frozenset({"rustc", "cargo", "gcc", "cl", "cmake"})
 MAX_BUILDS = 40  # per package; any more are dropped
 MAX_EXCERPT = 400  # characters
-MAX_SECONDS = 24 * 60 * 60  # the lab stops a build long before this
+MAX_SECONDS = 2 * 60 * 60  # the lab stops a build at 40 minutes; a little room in case that grows
 MAX_EXTENSIONS = 10_000
 _BUILD_TARGET = re.compile(r"(3\.[0-9]{1,2}t?) ([a-z0-9_-]+)", re.ASCII)
 _BUILD_VERSION = re.compile(r"[0-9][0-9A-Za-z.+!_-]{0,39}", re.ASCII)
 _BUILD_PYTHON = re.compile(r"3\.[0-9]{1,2}\.[0-9]{1,3}t?", re.ASCII)
 _WHEEL_TAG = re.compile(r"[a-z0-9_.]{1,40}-[a-z0-9_.]{1,40}-[a-z0-9_.]{1,80}", re.ASCII)
+# For each platform the lab can build on: the wheel platform tags a build for it can have (pure Python wheels are
+# checked apart), and the runner family and CPU that can run it. A result whose wheel or runner is for another
+# platform is dropped, as the tracker's own merge check drops it.
+_LAB_PLATFORMS: dict[str, tuple[re.Pattern[str], re.Pattern[str]]] = {
+    "linux-x86_64": (re.compile(r"(?:many)?linux[_0-9]*_x86_64"), re.compile(r"ubuntu-(?!.*arm)[a-z0-9.-]+")),
+    "linux-aarch64": (re.compile(r"(?:many)?linux[_0-9]*_aarch64"), re.compile(r"ubuntu-[a-z0-9.-]*arm[a-z0-9.-]*")),
+    "musl-x86_64": (re.compile(r"(?:musl)?linux[_0-9]*_x86_64"), re.compile(r"ubuntu-(?!.*arm)[a-z0-9.-]+")),
+    "musl-aarch64": (re.compile(r"(?:musl)?linux[_0-9]*_aarch64"), re.compile(r"ubuntu-[a-z0-9.-]*arm[a-z0-9.-]*")),
+    "win-amd64": (re.compile(r"win_amd64"), re.compile(r"windows-(?!.*arm)[a-z0-9.-]+")),
+    "win-arm64": (re.compile(r"win_arm64"), re.compile(r"windows-[a-z0-9.-]*arm[a-z0-9.-]*")),
+    "macos-arm64": (re.compile(r"macosx_[0-9_]+_(?:arm64|universal2)"), re.compile(r"macos-[a-z0-9.-]+")),
+    "macos-x86_64": (
+        re.compile(r"macosx_[0-9_]+_(?:x86_64|universal2)"),
+        re.compile(r"macos-[a-z0-9.-]+-intel|macos-1[0-3][a-z0-9.-]*"),
+    ),
+}
 _RUNNER = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9._-]{0,62}[A-Za-z0-9])?", re.ASCII)
 
 
@@ -239,13 +255,18 @@ def _build(raw: object) -> Build | None:
         return None
     if python.endswith("t") != target_python.endswith("t") or not python.startswith(target_python.rstrip("t") + "."):
         return None  # built with another Python than the target's
-    if not isinstance(runner, str) or not _RUNNER.fullmatch(runner):
+    if not isinstance(runner, str) or not _RUNNER.fullmatch(runner) or platform not in _LAB_PLATFORMS:
         return None
+    wheel_platform, runner_family = _LAB_PLATFORMS[platform]
+    if not runner_family.fullmatch(runner):
+        return None  # a runner that can't build for this platform
     if not isinstance(outcome, str) or outcome not in OUTCOMES or not _int(seconds, MAX_SECONDS):
         return None
     if outcome == "built":
         if not isinstance(wheel, str) or not _WHEEL_TAG.fullmatch(wheel):
             return None
+        if not (wheel.endswith("-none-any") or wheel_platform.fullmatch(wheel.split("-", 2)[2])):
+            return None  # a wheel for another platform says nothing about this one
         if not _int(extensions, MAX_EXTENSIONS) or (extensions and wheel.endswith("-any")):
             return None
         if not isinstance(imported, str) or imported not in IMPORTS:
@@ -262,7 +283,9 @@ def _build(raw: object) -> Build | None:
         return None
     if not isinstance(excerpt, str) or len(excerpt) > MAX_EXCERPT or not all(32 <= ord(c) < 127 for c in excerpt):
         return None
-    if "##[" in excerpt or _COMMAND.search(excerpt):
+    # Compile errors are full of C++ and Rust's "::" (std::vector), so only the legacy "##[" form is refused here:
+    # the excerpt is never printed in the text or Markdown output, and in --json it's inside a JSON string.
+    if "##[" in excerpt:
         return None
     if not isinstance(toolchains, list) or not all(isinstance(t, str) and t in TOOLCHAINS for t in toolchains):
         return None
