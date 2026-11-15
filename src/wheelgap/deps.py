@@ -113,10 +113,13 @@ class Resolver:
         if own or pure:
             chosen = [(own or pure)[0]]
         else:
-            by_platform: dict[str, dict] = {}
+            # One wheel per operating system, the target's own first (win_amd64 for win-arm64), so the two that must
+            # agree aren't, say, two Linux wheels.
+            by_os: dict[str, dict] = {}
             for e in wheels:
-                by_platform.setdefault(e["filename"].rsplit("-", 1)[-1], e)
-            chosen = list(by_platform.values())[:2]
+                by_os.setdefault(_os_family(e["filename"].removesuffix(".whl").rsplit("-", 1)[-1]), e)
+            mine = _os_family(target.platform.replace("-", "_"))
+            chosen = sorted(by_os.values(), key=lambda e: _os_family(e["filename"].rsplit("-", 1)[-1]) != mine)[:2]
         cache_key = (key, version, ",".join(e["filename"] for e in chosen))
         if cache_key not in self._requires:
             try:
@@ -270,6 +273,17 @@ class Resolver:
             f"--deps: can't settle on releases for Python {target.major}.{target.minor} on {target.platform} "
             "without a resolver that backtracks; check a lockfile instead (uv lock, or pip-compile)"
         )
+
+
+def _os_family(platform: str) -> str:
+    """The operating system a wheel platform tag (or a target's platform) is for: win, macos, linux, ios..."""
+    tag = platform.split(".", 1)[0].lower()
+    for prefix, family in (("win", "win"), ("macosx", "macos"), ("macos", "macos"), ("manylinux", "linux"),
+                           ("musllinux", "linux"), ("linux", "linux"), ("musl", "linux"), ("ios", "ios"),
+                           ("android", "android"), ("pyodide", "pyodide"), ("emscripten", "pyodide")):  # fmt: skip
+        if tag.startswith(prefix):
+            return family
+    return tag
 
 
 def _lookup_error(e: Exception) -> str:

@@ -61,8 +61,13 @@ INDEX = {
     # No Windows ARM or pure wheel, so a build from source there: two platforms' wheels must agree.
     "agree": {"1.0": release(["c"], files=(LINUX, WIN_AMD))},
     "differ": {"1.0": release(["c"], files=(LINUX, WIN_AMD), json_requires=None)},
+    # Two Linux wheels agree, but the Windows one is the one a Windows source build is like.
+    "sameos": {"1.0": release(["c"], files=(LINUX, "cp314-cp314-manylinux_2_17_aarch64.whl", WIN_AMD))},
 }
-DIFFERING = {"differ-1.0-" + WIN_AMD: ["c", "pywin"]}  # its win_amd64 wheel declares another dependency
+DIFFERING = {
+    "differ-1.0-" + WIN_AMD: ["c", "pywin"],
+    "sameos-1.0-" + WIN_AMD: ["c", "pywin"],
+}  # its win_amd64 wheel declares another dependency
 
 
 @pytest.fixture
@@ -245,3 +250,4 @@ def test_a_source_build_trusts_other_platforms_wheels_only_when_they_agree(index
     assert chosen == {"differ": "1.0"}
     assert errors["differ"].startswith("couldn't read its dependencies: its wheels for other platforms list different")
     assert resolve("differ", target=LIN)[0] == {"differ": "1.0", "c": "2.0"}  # its own wheel: no doubt
+    assert resolve("sameos")[1]["sameos"].startswith("couldn't read its dependencies: its wheels for other")
