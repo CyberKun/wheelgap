@@ -200,15 +200,19 @@ class Build:
         if self.outcome == "timeout":
             return f"didn't finish building in {took}"
         if self.outcome == "failed":
-            return f"fails to build: {self.reason}"
+            return "fails to build" if self.reason == "other" else f"fails to build: {self.reason}"
         if self.imported == "deps-failed":
             return f"builds in {took}, but its dependencies don't install"
         if self.imported != "ok":
             return f"builds in {took}, but doesn't import"
         if self.extensions == 0:
             if self.wheel is not None and self.wheel.endswith("-none-any"):
-                return f"builds in {took}, but only as pure Python (its compiled part was skipped)"
-            return f"builds in {took}, with no compiled extension module"
+                # The lab can't tell a pure-Python package from an optional extension that was skipped.
+                return (
+                    f"builds in {took} as pure Python, with no compiled extension module "
+                    "(if it has an optional one, that was skipped)"
+                )
+            return f"builds in {took}, but with no compiled extension module"
         if self.gil == "re-enabled":
             return f"builds in {took}, but importing it turns the GIL back on"
         return f"builds from source in {took} and imports" + (", GIL stays off" if self.gil == "kept-off" else "")

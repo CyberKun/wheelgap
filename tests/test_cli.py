@@ -2368,7 +2368,10 @@ def test_json_build_lab_matches_schema(capsys, tmp_path, tracker):
     assert data["packages"][0]["build_lab"] == {
         "3.14 win-arm64": {
             **regular,
-            "verdict": "builds in 87 s, but only as pure Python (its compiled part was skipped)",
+            "verdict": (
+                "builds in 87 s as pure Python, with no compiled extension module "
+                "(if it has an optional one, that was skipped)"
+            ),
         },
         "3.14t win-arm64": {**free, "verdict": "builds in 87 s, but importing it turns the GIL back on"},
         "3.14 linux-x86_64": {**failed, "verdict": "fails to build: needs OpenSSL"},

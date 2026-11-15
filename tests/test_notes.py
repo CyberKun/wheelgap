@@ -934,15 +934,19 @@ def test_build_lab_result_shown_for_the_checked_release_and_target(capsys, tmp_p
         ({**FT, "gil": "re-enabled"}, "builds in 87 s, but importing it turns the GIL back on"),
         (
             {"wheel": "py3-none-any", "extensions": 0},
-            "builds in 87 s, but only as pure Python (its compiled part was skipped)",
+            (
+                "builds in 87 s as pure Python, with no compiled extension module "
+                "(if it has an optional one, that was skipped)"
+            ),
         ),
-        ({"extensions": 0}, "builds in 87 s, with no compiled extension module"),
-        ({**FT, "extensions": 0, "gil": None}, "builds in 87 s, with no compiled extension module"),
+        ({"extensions": 0}, "builds in 87 s, but with no compiled extension module"),
+        ({**FT, "extensions": 0, "gil": None}, "builds in 87 s, but with no compiled extension module"),
         ({"import": "failed"}, "builds in 87 s, but doesn't import"),
         ({**FT, "import": "failed", "gil": None}, "builds in 87 s, but doesn't import"),
         ({"import": "deps-failed"}, "builds in 87 s, but its dependencies don't install"),
         ({**FAILED}, "fails to build: needs a Rust toolchain"),
         ({**FAILED, "reason": "compile error", "excerpt": "error: C2065"}, "fails to build: compile error"),
+        ({**FAILED, "reason": "other"}, "fails to build"),
         ({**FAILED, "outcome": "timeout", "reason": None, "seconds": 2400}, "didn't finish building in 40 min"),
     ],
 )

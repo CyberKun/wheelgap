@@ -141,8 +141,8 @@ pkg 1.0 on win-arm64: build lab (2026-11-15, windows-11-arm, Python 3.14.2): bui
 ```
 
 - The verdict is one of: `builds from source in 87 s and imports` (with `, GIL stays off` on free-threaded Python),
-  `builds in 87 s, but importing it turns the GIL back on`, `builds in 87 s, but only as pure Python (its compiled
-  part was skipped)`, `builds in 87 s, with no compiled extension module`, `builds in 87 s, but doesn't import`,
+  `builds in 87 s, but importing it turns the GIL back on`, `builds in 87 s as pure Python, with no compiled
+  extension module (if it has an optional one, that was skipped)`, `builds in 87 s, but with no compiled extension module`, `builds in 87 s, but doesn't import`,
   `builds in 87 s, but its dependencies don't install`, `fails to build: needs a Rust toolchain` (or another
   reason) and `didn't finish building in 40 min`. A wheel with no extension module is never called a working build.
 - These are the lab's dated observations on GitHub's runners, with the runner and Python they used, not a promise
