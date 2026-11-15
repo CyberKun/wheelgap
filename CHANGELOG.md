@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- `--explain --notes` now also shows the [coverage tracker](https://wheelgap.github.io/tracker/)'s build lab results for a `source` cell, from the same file as the notes: whether exactly that release built from its sdist for exactly that target on GitHub's runners, and imported, such as `pkg 1.0 on win-arm64: build lab (2026-11-15, windows-11-arm, Python 3.14.2): builds from source in 87 s and imports`, `... but importing it turns the GIL back on` or `fails to build: needs a Rust toolchain`. A wheel with no compiled extension module is never shown as a working build, and a result for another release shows nothing. These are the lab's dated observations on its runners, not a promise about your machine, and nothing it built is downloaded. `--json --explain` adds a `build_lab` object to each package, keyed by target label, with each result's fields and `verdict`. (#338, thanks [@patrickballard](https://github.com/patrickballard))
 - `--dockerfile` now says `ARG PY has an empty default, pass -p/-t instead` for an `ARG PY=` that the final image's `FROM` uses, instead of claiming the syntax is wrong, and reports an ARG value with a non-ASCII character (such as the no-break space Docker splits an ARG on) as unreadable, instead of reading it as one value and failing later with `invalid tag`. (#335, thanks [@bfs2021](https://github.com/bfs2021))
 
 ## 0.10.0 (2026-11-15)
