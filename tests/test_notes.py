@@ -947,6 +947,10 @@ def test_build_lab_result_shown_for_the_checked_release_and_target(capsys, tmp_p
         ({**FAILED}, "fails to build: needs a Rust toolchain"),
         ({**FAILED, "reason": "compile error", "excerpt": "error: C2065"}, "fails to build: compile error"),
         ({**FAILED, "reason": "other"}, "fails to build"),
+        (
+            {**FAILED, "reason": "unsupported platform"},
+            "the package doesn't support this platform (its own build says so)",
+        ),
         ({**FAILED, "outcome": "timeout", "reason": None, "seconds": 2400}, "didn't finish building in 40 min"),
     ],
 )

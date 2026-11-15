@@ -200,6 +200,8 @@ class Build:
         if self.outcome == "timeout":
             return f"didn't finish building in {took}"
         if self.outcome == "failed":
+            if self.reason == "unsupported platform":
+                return "the package doesn't support this platform (its own build says so)"
             return "fails to build" if self.reason == "other" else f"fails to build: {self.reason}"
         if self.imported == "deps-failed":
             return f"builds in {took}, but its dependencies don't install"
