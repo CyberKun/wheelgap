@@ -320,10 +320,12 @@ def test_inspect_flags_a_renamed_key_against_the_pinned_copy(tmp_path, file, old
 def test_inspect_lets_poetry_drop_its_graph_with_a_warning():
     # cleo's live lock moved from Poetry 1.x to lock-version 2.1, which records markers on packages, not edges.
     report = script.inspect(REAL / "tomlkit/poetry.lock", pinned=REAL / "cleo/poetry.lock")
-    assert not [m for m in report.of(MISREAD) if "dependency" in m]
-    assert report.of(WARNING) == [
-        "lock-version '2.1', with no dependency graph: refreshing the pinned copy would lose the corpus's "
-        "Poetry 1.x lock (pick another project for it)"
+    assert report.findings == [
+        (
+            WARNING,
+            "lock-version '2.1', with no dependency graph: refreshing the pinned copy would lose the corpus's "
+            "Poetry 1.x lock (pick another project for it)",
+        )
     ]
 
 
