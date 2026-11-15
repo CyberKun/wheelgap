@@ -146,9 +146,10 @@ pkg 1.0 on win-arm64: build lab (2026-11-15, windows-11-arm, Python 3.14.2): bui
   `builds in 87 s, but its dependencies don't install`, `fails to build: needs a Rust toolchain` (or another
   reason) and `didn't finish building in 40 min`. A wheel with no extension module is never called a working build.
 - These are the lab's dated observations on GitHub's runners, with the runner and Python they used, not a promise
-  about your machine, whose compilers and libraries may differ. Nothing the lab built is downloaded: the results come
-  in the same small file as the notes, so they add no request, and follow the same rules (opt-in, names known to be
-  PyPI's only, the cache, the timeouts).
+  about your machine. The runners have compilers and many system libraries preinstalled, so a build that works there
+  can still need setup on your machine: a package that needs a C library's headers, such as libpq's, may find them
+  already there. Nothing the lab built is downloaded: the results come in the same small file as the notes, so they
+  add no request, and follow the same rules (opt-in, names known to be PyPI's only, the cache, the timeouts).
 - A result for another release, or for another target (the free-threaded build says nothing about the regular one),
   shows nothing. The tracker builds its latest release, which may not be yours.
 - With `--json --explain`, each package gets a `build_lab` object, keyed by target label like `rejected`, with the
