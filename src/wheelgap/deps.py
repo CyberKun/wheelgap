@@ -62,7 +62,7 @@ class Resolver:
 
     def __init__(self) -> None:
         self._projects: dict[str, dict | Exception] = {}
-        self._requires: dict[tuple[str, str], list[Requirement] | Exception] = {}
+        self._requires: dict[tuple[str, str, str], list[Requirement] | Exception] = {}
         self.names: dict[str, str] = {}  # key -> the name the index gives it
 
     def _project(self, key: str) -> dict:
@@ -91,7 +91,7 @@ class Resolver:
         wheels = [e for e in files if e["filename"].endswith(".whl") and isinstance(e.get("url"), str)]
         own = [e for e in wheels if rejection(e["filename"], target) is None]
         pure = [e for e in wheels if e["filename"].endswith("-none-any.whl")]
-        wheel = (own or pure or wheels or [None])[0]
+        wheel: dict | None = (own or pure or wheels or [None])[0]  # type: ignore[list-item]
         cache_key = (key, version, wheel["filename"] if wheel else "")
         if cache_key not in self._requires:
             try:
