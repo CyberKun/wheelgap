@@ -34,7 +34,7 @@ All five are read-only. They look packages up on PyPI, or on the index in
   `wheelgap PATH --dockerfile DOCKERFILE --json` (`PATH` defaults to the
   Dockerfile's folder), plus the `image` it read (`python`, `platform`,
   `glibc`, `musl`, `build_args`), so an agent can ask before switching `python:3.13-slim` to
-  `-alpine` or adding `--platform=linux/arm64`. After 0.10.0, `build_args` maps global ARG names
+  `-alpine` or adding `--platform=linux/arm64`. `build_args` maps global ARG names
   used by the image's `FROM` to their defaults (or `{}` if none were used). If a
   Docker build overrides them with `--build-arg`, use `check_lockfile` with
   explicit `python` and `targets` instead. A Dockerfile wheelgap can't read
@@ -51,7 +51,7 @@ On `pyodide` targets, `check_package` and `check_lockfile` take an optional
 `pyodide_lock` (a path or https URL of a `pyodide-lock.json`, as
 `--pyodide-lock` does), so packages Pyodide ships itself show as `bundled`.
 
-After 0.10.0, `check_lockfile` also takes an optional `environment` string for
+`check_lockfile` also takes an optional `environment` string for
 `pixi.lock` inputs, like the CLI's `--environment`. For example, pass
 `"environment": "test"` to check the `test` environment instead of `default`.
 An unknown environment is a tool error listing the lockfile's environment names.

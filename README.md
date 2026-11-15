@@ -60,7 +60,7 @@ wheelgap pixi.lock --environment test -p 3.13 -t linux-x86_64,macos-arm64
 # No lockfile? Check packages directly (latest version, or pin one)
 wheelgap psycopg2 uvloop numpy==2.3.4 -t windows,win-arm64
 
-# ...and, after 0.10.0, everything they install too, with the path to each gap
+# ...and everything they install too, with the path to each gap
 wheelgap mcp==2.3.0 --deps -t win-arm64 --explain
 
 # Take the Python and platform from the final stage of a Dockerfile
@@ -123,7 +123,7 @@ Python versions take a trailing `t` for free-threaded builds (`3.14t`). `--glibc
 
 ```yaml
 - uses: actions/checkout@v7
-- uses: wheelgap/wheelgap@v0.10.0
+- uses: wheelgap/wheelgap@v0.11.0
   with:
     args: uv.lock -p 3.13 -t linux-x86_64,linux-aarch64
 ```
@@ -135,7 +135,7 @@ The job fails when a dependency would build from source on a target you ship, fo
 ```yaml
 repos:
   - repo: https://github.com/wheelgap/wheelgap
-    rev: v0.10.0
+    rev: v0.11.0
     hooks:
       - id: wheelgap
 ```
@@ -196,7 +196,7 @@ This checks both lockfiles and lists the packages that got worse on a target (a 
 ## How it works
 
 - **Lockfiles are read offline.** `uv.lock`, `pylock.toml`, `poetry.lock` and `pdm.lock` already record every file published for each pinned version. wheelgap parses the wheel filenames' tags with [`packaging`](https://packaging.pypa.io/) and checks them against the exact tag set each target accepts. That is the same logic pip and uv use to pick a wheel.
-- **`requirements.txt`, `Pipfile.lock`, `pixi.lock`, `pyproject.toml` and bare package names** are looked up on the PyPI JSON API (or your `--index-url`). wheelgap checks the requirements you give it and doesn't resolve dependencies, except for package names with `--deps` (after 0.10.0), which resolves what they install per target from PyPI's metadata.
+- **`requirements.txt`, `Pipfile.lock`, `pixi.lock`, `pyproject.toml` and bare package names** are looked up on the PyPI JSON API (or your `--index-url`). wheelgap checks the requirements you give it and doesn't resolve dependencies, except for package names with `--deps`, which resolves what they install per target from PyPI's metadata.
 - **Environment markers are respected.** A `pywin32 ; sys_platform == 'win32'` dependency won't show up as a Linux gap. For `uv.lock` the dependency graph is walked per target, so transitive platform-specific packages are handled too.
 - **No guessing.** Where wheelgap can't be sure, it says `unknown`, which counts as a gap, rather than guess.
 

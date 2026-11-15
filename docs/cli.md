@@ -13,7 +13,7 @@ Flags that take a list (`-p`, `-t`, `--extra`, `--group`, `--only-group`, `--ign
 can be repeated; `-p`, `-t`, `--ignore` and `--advisory` also take comma-separated values. Flags win over
 [`[tool.wheelgap]`](configuration.md).
 
-`wheelgap --help` lists the flags of the version you run. This page describes `main`; flags marked **after 0.10.0**
+`wheelgap --help` lists the flags of the version you run. This page describes `main`; flags marked **after 0.11.0**
 aren't in a release yet.
 
 ## Targets
@@ -136,7 +136,7 @@ directory's `pixi.lock` the lockfile read. Naming one for any other input is an 
 
 ### `--deps` {#deps}
 
-**After 0.10.0.** For package names on the command line, also check everything they install. wheelgap resolves the
+For package names on the command line, also check everything they install. wheelgap resolves the
 tree for each target from PyPI's metadata: for each requirement, the newest release that meets every constraint on it,
 supports the target's Python and isn't yanked (a yanked release only for an `==` pin), following markers and extras as
 pip evaluates them on that target. `--explain` shows the path to each gap (`via: mcp → PyJWT → cryptography`), and
@@ -215,7 +215,7 @@ package with a gap, such as a binary package to use instead. It sends the names 
 wheelgap.github.io, so it's opt-in, and only for names that pass [the PyPI-origin rule](how-it-works.md#pypi-origin);
 never with `--offline`, `--index-url` or a `WHEELGAP_INDEX_URL` mirror. `notes = true` in `[tool.wheelgap]` turns it
 on by default, and `--no-notes` turns it off for one run. See [Tracker notes](output.md#notes).
-**After 0.10.0**, it also shows the tracker's [build lab results](output.md#build-lab) for a `source` cell, from the
+It also shows the tracker's [build lab results](output.md#build-lab) for a `source` cell, from the
 same file: whether exactly that release built from its sdist and imported on GitHub's runners for that target. They're
 the lab's dated observations on GitHub's runners, which have compilers and many system libraries preinstalled, so a
 build that works there can still need setup on your machine. Nothing the lab built is downloaded.
@@ -235,7 +235,7 @@ With `--explain`, also name the lowest newer release with a wheel for a pinned p
 targets, or each target's nearest when no one release has them all. It looks each package with a gap up on pypi.org
 once, only for names that pass [the PyPI-origin rule](how-it-works.md#pypi-origin), and never changes a status, the
 summary or the exit code. A run with `--index-url` or `WHEELGAP_INDEX_URL` looks nothing up, and `--offline` refuses the
-flag. After 0.10.0, with `--markdown`, it renders suggestions as a Markdown list under the explanation. With `--json`, adds `suggest` to each package with a gap. See
+flag. With `--markdown`, it renders suggestions as a Markdown list under the explanation. With `--json`, adds `suggest` to each package with a gap. See
 [Newer releases](output.md#suggest).
 
 ### `-q`, `--quiet`, `--no-quiet` {#quiet}

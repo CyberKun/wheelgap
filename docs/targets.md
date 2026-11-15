@@ -226,7 +226,7 @@ The snippet combines every job in every workflow, including lint, release and bo
     - setup-python's `freethreaded: true`, which adds the `t` (free-threading starts at 3.13, so `3.12t` is refused).
     - setup-python's `architecture`, where it's certain: `x86` on x64 Windows is `win32`, and `x64` on Apple silicon is
       `macos-x86_64` (Rosetta). It can come from a literal matrix, which pairs each runner with its own architecture.
-    - *After 0.10.0:* a job's `container:`, as a literal image string or a mapping (block or `{ image: ... }`) with only an `image:`
+    - A job's `container:`, as a literal image string or a mapping (block or `{ image: ... }`) with only an `image:`
       key. The image is read exactly as `--dockerfile` reads a `FROM`, so `container: python:3.13-alpine` on
       `ubuntu-latest` suggests `musl-x86_64` and Python 3.13 (and `musl = "1.2"`) rather than the runner's target.
       Actions pulls the image for the runner's CPU without forcing a platform, so the same image on
@@ -249,7 +249,7 @@ The snippet combines every job in every workflow, including lint, release and bo
     - `windows-11-arm` → `win-arm64`.
     - `macos-latest`, `macos-14` and later, `xcode-*` and the `-xlarge` runners → `macos-arm64`.
     - `macos-13`, `macos-15-intel` and the `-large` runners → `macos-x86_64`.
-- **Container images** (after 0.10.0). A job's literal `container:` image names its own libc and Python, read as a Dockerfile's
+- **Container images**. A job's literal `container:` image names its own libc and Python, read as a Dockerfile's
   `FROM` is, so the runner's target isn't read for that job; its CPU is, since Actions pulls the image's build for
   that CPU (an ARM runner gets `musl-aarch64` from `python:3.13-alpine`). A setup step that picks a Python installs it
   into the image, so the image's libc applies to that Python, which is the job's instead of the image's own.
