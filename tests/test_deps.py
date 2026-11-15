@@ -18,9 +18,12 @@ WIN_AMD = "cp314-cp314-win_amd64.whl"
 WIN_ARM = "cp314-cp314-win_arm64.whl"
 
 
-def release(requires=(), files=(ANY,), requires_python=None, yanked=False, sdist=True):
-    return {"requires": list(requires) if requires is not None else None, "files": list(files),
-            "requires_python": requires_python, "yanked": yanked, "sdist": sdist}  # fmt: skip
+def release(requires=(), files=(ANY,), requires_python=None, yanked=False, sdist=True, json_requires="same"):
+    """`requires` is what the wheels' metadata files declare; `json_requires`, what PyPI's JSON page says (by
+    default the same), which comes from whichever file was uploaded first."""
+    requires = list(requires) if requires is not None else None
+    return {"requires": requires, "files": list(files), "requires_python": requires_python, "yanked": yanked,
+            "sdist": sdist, "json_requires": requires if json_requires == "same" else json_requires}  # fmt: skip
 
 
 # name -> version -> release. "app" needs lib[crypto]; lib's crypto extra needs crypt, which has no Windows ARM
@@ -43,6 +46,16 @@ INDEX = {
     "y": {"1.0": release(["c<2"])},
     "yank": {"1.0": release(), "2.0": release(yanked=True)},
     "nometa": {"1.0": release(requires=None, files=())},  # sdist only and no Requires-Dist: can't tell
+    "sdistonly": {"1.0": release(["c"], files=())},  # no wheel: the JSON page's Requires-Dist is all there is
+    # PyPI's JSON page lists nothing (an sdist was uploaded first), but the wheel declares c (methodtools 0.4.7).
+    "jsonliar": {"1.0": release(["c"], json_requires=None)},
+    # pc's newest final is 2.0; pa's constraint lets its 2.1b1 prerelease in, whichever way round they come.
+    "pa": {"1.0": release(["pc>=2.0b1"])},
+    "pb": {"1.0": release(["pc"])},
+    "pc": {"1.0": release(), "2.0": release(), "2.1b1": release()},
+    # noarm 2.0 has only a Linux wheel and no sdist, so pip on Windows on ARM installs 1.0; nowhere never installs.
+    "noarm": {"1.0": release(files=(WIN_ARM,)), "2.0": release(files=(LINUX,), sdist=False)},
+    "nowhere": {"1.0": release(files=(LINUX,), sdist=False), "2.0": release(files=(LINUX,), sdist=False)},
 }
 
 
@@ -51,12 +64,16 @@ def index(monkeypatch):
     calls = []
 
     def entries(name, version, r):
-        out = [{"filename": f"{name}-{version}-{tag}", "requires_python": r["requires_python"],
-                "yanked": r["yanked"]} for tag in r["files"]]  # fmt: skip
-        if r["sdist"]:
-            out.append({"filename": f"{name}-{version}.tar.gz", "requires_python": r["requires_python"],
-                        "yanked": r["yanked"]})  # fmt: skip
-        return out
+        filenames = [f"{name}-{version}-{tag}" for tag in r["files"]] + [f"{name}-{version}.tar.gz"] * r["sdist"]
+        return [{"filename": f, "url": f"https://files.example/{f}", "requires_python": r["requires_python"],
+                 "yanked": r["yanked"]} for f in filenames]  # fmt: skip
+
+    def fetch_text(url, max_bytes, timeout=20.0, attempts=4):
+        calls.append(url)
+        filename = url.removeprefix("https://files.example/").removesuffix(".metadata")
+        name, version = filename.split("-")[:2]
+        r = INDEX[name][version]
+        return "Metadata-Version: 2.1\nName: " + name + "\n" + "".join(f"Requires-Dist: {d}\n" for d in r["requires"])
 
     def fetch_json(url, timeout=20.0, attempts=4, max_bytes=None, deadline=None):
         calls.append(url)
@@ -73,10 +90,11 @@ def index(monkeypatch):
         r = versions.get(parts[1])
         if r is None:
             raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)  # type: ignore[arg-type]
-        return {"info": {"name": name, "version": parts[1], "requires_dist": r["requires"]},
+        return {"info": {"name": name, "version": parts[1], "requires_dist": r["json_requires"]},
                 "urls": entries(name, parts[1], r)}  # fmt: skip
 
     monkeypatch.setattr(pypi, "fetch_json", fetch_json)
+    monkeypatch.setattr(pypi, "fetch_text", fetch_text)
     return calls
 
 
@@ -189,3 +207,19 @@ def test_round_limit_refuses(index, monkeypatch):
     monkeypatch.setattr(deps, "MAX_ROUNDS", 1)
     with pytest.raises(DepsError, match="can't settle on releases"):
         resolve("a", "b")
+
+
+def test_dependencies_come_from_the_wheel_not_the_json_page(index):
+    assert resolve("jsonliar")[0] == {"jsonliar": "1.0", "c": "2.0"}
+    assert resolve("sdistonly")[0] == {"sdistonly": "1.0", "c": "2.0"}  # no wheel: the JSON page it is
+
+
+@pytest.mark.parametrize("order", [("pa", "pb"), ("pb", "pa")])
+def test_picks_dont_depend_on_requirement_order(index, order):
+    assert resolve(*order)[0]["pc"] == "2.1b1"
+
+
+def test_a_release_that_doesnt_install_on_the_target_is_passed_over(index):
+    assert resolve("noarm")[0] == {"noarm": "1.0"}
+    assert resolve("noarm", target=LIN)[0] == {"noarm": "2.0"}
+    assert resolve("nowhere")[0] == {"nowhere": "2.0"}  # nothing installs: the newest, which shows the gap

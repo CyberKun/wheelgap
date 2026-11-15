@@ -18,6 +18,8 @@ uses it in place of a lockfile's graph. Each release picked becomes a Package wi
 
 from __future__ import annotations
 
+import email.parser
+import urllib.error
 from collections import deque
 from dataclasses import dataclass, field
 from urllib.parse import quote
@@ -28,12 +30,13 @@ from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
 
 from . import pypi
-from .check import marker_holds
+from .check import marker_holds, rejection
 from .sources import Package, Source, SourceError
 from .targets import Target
 
 MAX_ROUNDS = 50  # restarts per target before giving up
 MAX_PACKAGES = 2000  # in one target's tree: past this, something is wrong
+METADATA_MAX_BYTES = 1024 * 1024  # a wheel's METADATA file
 
 
 class DepsError(SourceError):
@@ -79,43 +82,53 @@ class Resolver:
             raise found
         return found
 
-    def requires(self, key: str, version: str) -> list[Requirement]:
-        """The release's Requires-Dist, from its own JSON page."""
-        if (key, version) not in self._requires:
+    def requires(self, key: str, version: str, target: Target) -> list[Requirement]:
+        """The release's Requires-Dist, from a wheel's own metadata (PEP 658): the wheel the target installs if there
+        is one, else a pure one, else any. PyPI's JSON `requires_dist` is read from whichever file was uploaded
+        first, so it can be empty when the wheels declare dependencies; it's used only for a release with no wheel,
+        and when it's missing there too the dependencies are unknown."""
+        files = [e for e in pypi._files(self._project(key)["releases"].get(version, [])) if not e.get("yanked")]
+        wheels = [e for e in files if e["filename"].endswith(".whl") and isinstance(e.get("url"), str)]
+        own = [e for e in wheels if rejection(e["filename"], target) is None]
+        pure = [e for e in wheels if e["filename"].endswith("-none-any.whl")]
+        wheel = (own or pure or wheels or [None])[0]
+        cache_key = (key, version, wheel["filename"] if wheel else "")
+        if cache_key not in self._requires:
             try:
-                data = pypi.fetch_json(f"{pypi.index_url()}/{quote(key)}/{quote(version)}/json")
-                info = data.get("info") if isinstance(data, dict) else None
-                if not isinstance(info, dict):
-                    raise ValueError("the index gave no release metadata")
-                listed = info.get("requires_dist")
-                if listed is None:
-                    urls = data.get("urls")
-                    wheels = isinstance(urls, list) and any(
-                        isinstance(u, dict) and str(u.get("filename", "")).endswith(".whl") for u in urls
-                    )
-                    if not wheels:
-                        # PyPI reads Requires-Dist from the first file uploaded; an old sdist's metadata may leave
-                        # them out even when setup.py has some, so "none" can't be trusted.
+                if wheel is not None:
+                    try:
+                        text = pypi.fetch_text(wheel["url"] + ".metadata", max_bytes=METADATA_MAX_BYTES)
+                    except urllib.error.HTTPError as e:
+                        raise ValueError(f"no metadata file for {wheel['filename']} (HTTP {e.code})") from None
+                    listed: object = email.parser.Parser().parsestr(text).get_all("Requires-Dist") or []
+                else:
+                    data = pypi.fetch_json(f"{pypi.index_url()}/{quote(key)}/{quote(version)}/json")
+                    info = data.get("info") if isinstance(data, dict) else None
+                    listed = info.get("requires_dist") if isinstance(info, dict) else None
+                    if listed is None:
+                        # An old sdist's metadata may leave them out even when setup.py has some.
                         raise ValueError("PyPI lists no dependencies for it and it has no wheel to confirm that")
-                    listed = []
                 if not isinstance(listed, list) or not all(isinstance(r, str) for r in listed):
                     raise ValueError("the index gave dependencies that aren't a list of strings")
-                self._requires[(key, version)] = [Requirement(r) for r in listed]
+                self._requires[cache_key] = [Requirement(r) for r in listed]
             except InvalidRequirement as e:
-                self._requires[(key, version)] = ValueError(f"a dependency doesn't parse: {e}")
+                self._requires[cache_key] = ValueError(f"a dependency doesn't parse: {e}")
             except Exception as e:
-                self._requires[(key, version)] = e
-        found = self._requires[(key, version)]
+                self._requires[cache_key] = e
+        found = self._requires[cache_key]
         if isinstance(found, Exception):
             raise found
         return found
 
-    def pick(self, key: str, specs: list[str], python: str) -> str | None:
-        """The newest release meeting every specifier, with a file that isn't yanked and supports `python`. An exact
-        `==` pin may pick a yanked release, as pip does."""
+    def pick(self, key: str, specs: list[str], target: Target) -> str | None:
+        """The release pip would pick: the newest meeting every specifier with a file that isn't yanked, supports the
+        target's Python and installs there (a matching wheel, or an sdist). An exact `==` pin may pick a yanked release,
+        as pip does. When no matching release installs there, the newest matching one, which then shows the gap."""
+        python = f"{target.major}.{target.minor}"
         releases = self._project(key)["releases"]
         exact = {s.version for spec in specs for s in SpecifierSet(spec) if s.operator in ("==", "===")}
         usable: dict[Version, str] = {}
+        installable: dict[Version, str] = {}
         for text, entries in releases.items():
             try:
                 version = Version(text)
@@ -123,14 +136,17 @@ class Resolver:
             except (InvalidVersion, ValueError):
                 continue
             pinned = text in exact or str(version) in exact
-            if any((pinned or not e.get("yanked")) and pypi._supports_python(e, python) for e in files):
+            live = [e for e in files if (pinned or not e.get("yanked")) and pypi._supports_python(e, python)]
+            if live:
                 usable[version] = text
+            if any(not e["filename"].endswith(".whl") or rejection(e["filename"], target) is None for e in live):
+                installable[version] = text
         combined = SpecifierSet(",".join(s for s in specs if s))
-        chosen = max(combined.filter(usable), default=None)
+        chosen = max(combined.filter(installable), default=None) or max(combined.filter(usable), default=None)
         return usable[chosen] if chosen is not None else None
 
     def _round(self, roots: list[Requirement], target: Target, learned: dict[str, set[str]]) -> _Tree | _Conflict:
-        python = f"{target.major}.{target.minor}"
+        python = f"{target.major}.{target.minor}"  # for messages
         tree = _Tree()
         extras: dict[str, frozenset[str]] = {}
         queue: deque[tuple[Requirement, frozenset[str], list[str]]] = deque((r, frozenset(), []) for r in roots)
@@ -157,7 +173,7 @@ class Resolver:
                     continue
                 specs = sorted(tree.imposed[key] | learned.get(key, set()))
                 try:
-                    version = self.pick(key, specs, python)
+                    version = self.pick(key, specs, target)
                 except Exception as e:
                     tree.errors[key] = _lookup_error(e)
                     tree.paths[key] = [*path, self.names.get(key, req.name)]
@@ -180,7 +196,7 @@ class Resolver:
                 if len(tree.chosen) > MAX_PACKAGES:
                     raise DepsError(f"--deps: more than {MAX_PACKAGES} packages; check a lockfile instead")
             try:
-                requires = self.requires(key, tree.chosen[key])
+                requires = self.requires(key, tree.chosen[key], target)
             except Exception as e:
                 tree.errors[key] = f"couldn't read its dependencies: {_lookup_error(e)}"
                 continue
@@ -201,8 +217,17 @@ class Resolver:
                 continue
             # A learned constraint the finished tree doesn't impose would hold a package back: drop it, go again.
             unused = {(k, s) for k, specs in learned.items() for s in specs if s not in out.imposed.get(k, set())}
-            if not unused:
+            # A release picked before all its constraints were known may not be the one they pick together (a later
+            # `>=2.0b1` lets prereleases in): go again with them all known from the start.
+            stale = [
+                k
+                for k, v in out.chosen.items()
+                if self.pick(k, sorted(out.imposed[k] | learned.get(k, set())), target) != v
+            ]
+            if not unused and not stale:
                 return out
+            for k in stale:
+                learned.setdefault(k, set()).update(out.imposed[k])
             for k, s in unused:
                 learned[k].discard(s)
             learned = {k: specs for k, specs in learned.items() if specs}

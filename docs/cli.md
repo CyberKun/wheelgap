@@ -144,7 +144,12 @@ pip evaluates them on that target. `--explain` shows the path to each gap (`via:
 
 It isn't pip's resolver. When a later constraint rules out a release it already picked, it starts again with that
 constraint known; if the constraints on a package can't all be met, it stops with an error rather than guess. A release
-whose dependencies it can't read (an sdist-only release with no `Requires-Dist` on PyPI, say) is `unknown`. It looks
+whose dependencies it can't read (an sdist-only release with no `Requires-Dist` on PyPI, say) is `unknown`. Where pip
+would backtrack to an older release of a package to satisfy an upper bound (`"numpy<2" pandas`), it stops with that
+error too. A package with no release that installs on a target (no matching wheel or sdist) is shown at its newest
+matching release, as `missing`, rather than walking back to an old release of whatever depends on it. Dependencies are
+read from a wheel's own metadata file, since PyPI's JSON page can leave them out. A marker it can't evaluate for a
+target (`platform_release`) counts as true there. It looks
 up each package in the tree on the PyPI JSON API, so it doesn't work with `--offline`, `--index-url` or a lockfile
 input; a lockfile from `uv lock` or `pip-compile` is exact, so prefer one when you have it.
 
