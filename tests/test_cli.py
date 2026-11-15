@@ -2341,6 +2341,7 @@ def test_json_build_lab_matches_schema(capsys, tmp_path, tracker):
     }
     failed = {
         **common,
+        "runner": "ubuntu-24.04",
         "target": "3.14 linux-x86_64",
         "python": "3.14.2",
         "outcome": "failed",
