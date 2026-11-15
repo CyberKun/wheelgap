@@ -56,7 +56,13 @@ INDEX = {
     # noarm 2.0 has only a Linux wheel and no sdist, so pip on Windows on ARM installs 1.0; nowhere never installs.
     "noarm": {"1.0": release(files=(WIN_ARM,)), "2.0": release(files=(LINUX,), sdist=False)},
     "nowhere": {"1.0": release(files=(LINUX,), sdist=False), "2.0": release(files=(LINUX,), sdist=False)},
+    "egg": {"1.0": release(files=(WIN_ARM,)), "2.0": release(files=("py3.14.egg",), sdist=False)},
+    "yq": {"1.0": release(["c"], yanked=True, json_requires=[])},  # yanked: its wheel still says what it needs
+    # No Windows ARM or pure wheel, so a build from source there: two platforms' wheels must agree.
+    "agree": {"1.0": release(["c"], files=(LINUX, WIN_AMD))},
+    "differ": {"1.0": release(["c"], files=(LINUX, WIN_AMD), json_requires=None)},
 }
+DIFFERING = {"differ-1.0-" + WIN_AMD: ["c", "pywin"]}  # its win_amd64 wheel declares another dependency
 
 
 @pytest.fixture
@@ -72,8 +78,8 @@ def index(monkeypatch):
         calls.append(url)
         filename = url.removeprefix("https://files.example/").removesuffix(".metadata")
         name, version = filename.split("-")[:2]
-        r = INDEX[name][version]
-        return "Metadata-Version: 2.1\nName: " + name + "\n" + "".join(f"Requires-Dist: {d}\n" for d in r["requires"])
+        requires = DIFFERING.get(filename, INDEX[name][version]["requires"])
+        return "Metadata-Version: 2.1\nName: " + name + "\n" + "".join(f"Requires-Dist: {d}\n" for d in requires)
 
     def fetch_json(url, timeout=20.0, attempts=4, max_bytes=None, deadline=None):
         calls.append(url)
@@ -223,3 +229,19 @@ def test_a_release_that_doesnt_install_on_the_target_is_passed_over(index):
     assert resolve("noarm")[0] == {"noarm": "1.0"}
     assert resolve("noarm", target=LIN)[0] == {"noarm": "2.0"}
     assert resolve("nowhere")[0] == {"nowhere": "2.0"}  # nothing installs: the newest, which shows the gap
+
+
+def test_only_wheels_and_sdists_count(index):
+    assert resolve("egg")[0] == {"egg": "1.0"}  # pip can't install 2.0's .egg
+
+
+def test_a_pinned_yanked_release_reads_its_wheel(index):
+    assert resolve("yq==1.0")[0] == {"yq": "1.0", "c": "2.0"}
+
+
+def test_a_source_build_trusts_other_platforms_wheels_only_when_they_agree(index):
+    assert resolve("agree")[0] == {"agree": "1.0", "c": "2.0"}
+    chosen, errors, _ = resolve("differ")
+    assert chosen == {"differ": "1.0"}
+    assert errors["differ"].startswith("couldn't read its dependencies: its wheels for other platforms list different")
+    assert resolve("differ", target=LIN)[0] == {"differ": "1.0", "c": "2.0"}  # its own wheel: no doubt

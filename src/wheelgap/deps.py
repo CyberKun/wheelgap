@@ -30,7 +30,7 @@ from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
 
 from . import pypi
-from .check import marker_holds, rejection
+from .check import SDIST_SUFFIXES, marker_holds, rejection
 from .sources import Package, Source, SourceError
 from .targets import Target
 
@@ -64,6 +64,7 @@ class Resolver:
         self._projects: dict[str, dict | Exception] = {}
         self._requires: dict[tuple[str, str, str], list[Requirement] | Exception] = {}
         self.names: dict[str, str] = {}  # key -> the name the index gives it
+        self._metadata: dict[str, list[str] | Exception] = {}  # a wheel's .metadata URL -> its Requires-Dist
 
     def _project(self, key: str) -> dict:
         if key not in self._projects:
@@ -82,25 +83,52 @@ class Resolver:
             raise found
         return found
 
+    def _wheel_requires(self, wheel: dict) -> list[str]:
+        url = wheel["url"] + ".metadata"
+        if url not in self._metadata:
+            try:
+                text = pypi.fetch_text(url, max_bytes=METADATA_MAX_BYTES)
+                self._metadata[url] = email.parser.Parser().parsestr(text).get_all("Requires-Dist") or []
+            except urllib.error.HTTPError as e:
+                self._metadata[url] = ValueError(f"no metadata file for {wheel['filename']} (HTTP {e.code})")
+            except Exception as e:
+                self._metadata[url] = e
+        found = self._metadata[url]
+        if isinstance(found, Exception):
+            raise found
+        return found
+
     def requires(self, key: str, version: str, target: Target) -> list[Requirement]:
         """The release's Requires-Dist, from a wheel's own metadata (PEP 658): the wheel the target installs if there
-        is one, else a pure one, else any. PyPI's JSON `requires_dist` is read from whichever file was uploaded
-        first, so it can be empty when the wheels declare dependencies; it's used only for a release with no wheel,
-        and when it's missing there too the dependencies are unknown."""
-        files = [e for e in pypi._files(self._project(key)["releases"].get(version, [])) if not e.get("yanked")]
+        is one, else a pure one. A target that builds from source with neither reads two other platforms' wheels and
+        takes their answer only if they agree, since an old setup.py can write platform-specific dependencies into
+        each wheel without markers. PyPI's JSON `requires_dist` is read from whichever file was uploaded first, so it
+        can be empty when the wheels declare dependencies; it's used only for a release with no wheel, and when it's
+        missing there too the dependencies are unknown."""
+        files = pypi._files(self._project(key)["releases"].get(version, []))
+        files = [e for e in files if not e.get("yanked")] or files  # every file of a yanked release is yanked
         wheels = [e for e in files if e["filename"].endswith(".whl") and isinstance(e.get("url"), str)]
         own = [e for e in wheels if rejection(e["filename"], target) is None]
         pure = [e for e in wheels if e["filename"].endswith("-none-any.whl")]
-        wheel: dict | None = (own or pure or wheels or [None])[0]  # type: ignore[list-item]
-        cache_key = (key, version, wheel["filename"] if wheel else "")
+        if own or pure:
+            chosen = [(own or pure)[0]]
+        else:
+            by_platform: dict[str, dict] = {}
+            for e in wheels:
+                by_platform.setdefault(e["filename"].rsplit("-", 1)[-1], e)
+            chosen = list(by_platform.values())[:2]
+        cache_key = (key, version, ",".join(e["filename"] for e in chosen))
         if cache_key not in self._requires:
             try:
-                if wheel is not None:
-                    try:
-                        text = pypi.fetch_text(wheel["url"] + ".metadata", max_bytes=METADATA_MAX_BYTES)
-                    except urllib.error.HTTPError as e:
-                        raise ValueError(f"no metadata file for {wheel['filename']} (HTTP {e.code})") from None
-                    listed: object = email.parser.Parser().parsestr(text).get_all("Requires-Dist") or []
+                listed: object
+                if chosen:
+                    answers = [self._wheel_requires(e) for e in chosen]
+                    if any(sorted(a) != sorted(answers[0]) for a in answers):
+                        raise ValueError(
+                            "its wheels for other platforms list different dependencies, so what a build from source "
+                            "here installs can't be told"
+                        )
+                    listed = answers[0]
                 else:
                     data = pypi.fetch_json(f"{pypi.index_url()}/{quote(key)}/{quote(version)}/json")
                     info = data.get("info") if isinstance(data, dict) else None
@@ -136,10 +164,17 @@ class Resolver:
             except (InvalidVersion, ValueError):
                 continue
             pinned = text in exact or str(version) in exact
-            live = [e for e in files if (pinned or not e.get("yanked")) and pypi._supports_python(e, python)]
+            # pip installs only wheels and sdists: not an .egg, .exe or .msi.
+            live = [
+                e
+                for e in files
+                if (pinned or not e.get("yanked"))
+                and pypi._supports_python(e, python)
+                and e["filename"].endswith((".whl", *SDIST_SUFFIXES))
+            ]
             if live:
                 usable[version] = text
-            if any(not e["filename"].endswith(".whl") or rejection(e["filename"], target) is None for e in live):
+            if any(e["filename"].endswith(SDIST_SUFFIXES) or rejection(e["filename"], target) is None for e in live):
                 installable[version] = text
         combined = SpecifierSet(",".join(s for s in specs if s))
         chosen = max(combined.filter(installable), default=None) or max(combined.filter(usable), default=None)
