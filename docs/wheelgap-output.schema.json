@@ -154,7 +154,7 @@
                 },
                 "issues_url": {
                     "type": ["string", "null"],
-                    "description": "Present with --explain: the package's issue tracker URL from its PyPI metadata (or GitHub /issues fallback), or null if none was found or the package's index isn't known to be PyPI."
+                    "description": "Present from 0.12.0 on (older versions don't write it), with --explain: the package's issue tracker URL from its PyPI metadata (or GitHub /issues fallback), or null if none was found or the package's index isn't known to be PyPI."
                 },
                 "build_requires": {
                     "type": ["array", "null"],

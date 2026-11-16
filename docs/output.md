@@ -23,7 +23,7 @@ Add `set -o pipefail` when you pipe the output, so input errors still fail.
 ## Text
 
 ```text
-wheelgap 0.11.0 · uv.lock · 5 packages · Python 3.13
+wheelgap 0.12.0 · uv.lock · 5 packages · Python 3.13
 
 package    version  linux-aarch64  musl-aarch64
 fastlib    2.0.0    ● source       ● source
@@ -88,7 +88,7 @@ uvloop 0.21.0 on win-arm64: ● source
 Other inputs have no dependency graph, so they show no path. If you think wheelgap got a package wrong, this output
 (or `--json --explain`) is all a bug report needs, with no need to share your lockfile.
 
-After 0.11.0, when the package comes from PyPI and publishes an issue tracker in its metadata (or a GitHub repository
+When the package comes from PyPI and publishes an issue tracker in its metadata (or a GitHub repository
 fallback), each gap line also links to it so you can ask the maintainers for a wheel:
 
 ```text
@@ -319,7 +319,7 @@ gaps = [p["name"] for p in data["packages"] if p["results"].get(key) in ("source
 ```
 
 With `--json --explain`, each package gets `rejected` (`{"file", "reason"}` objects) and `via` (the dependency path),
-both keyed by target label like `results`; `via` is `{}` for inputs with no dependency graph. After 0.11.0 it also
+both keyed by target label like `results`; `via` is `{}` for inputs with no dependency graph. It also
 gets `issues_url`: the package's issue tracker URL from its PyPI metadata, or `null`.
 
 If an input can't be read (a missing lockfile, an unknown target, a bad `[tool.wheelgap]` value), `--json` prints an
@@ -346,7 +346,7 @@ wheels go in a collapsed section.
 ```markdown
 ### wheelgap: 3 of 5 packages have gaps
 
-wheelgap 0.11.0 · `uv.lock` · 5 packages · Python 3.13
+wheelgap 0.12.0 · `uv.lock` · 5 packages · Python 3.13
 
 | package | version | linux-aarch64 | musl-aarch64 |
 | --- | --- | --- | --- |
