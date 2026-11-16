@@ -84,7 +84,7 @@ jobs:
   were. The token is only sent to the `https://` host in `GITHUB_SERVER_URL` (GitHub Enterprise Server included); if
   that isn't an `https://` URL, no comment is posted and the step warns. Package names and versions come from the pull
   request, so they're escaped and can't add links, @mentions or Markdown to the comment.
-- The comment also includes the [release suggestions](output.md#suggest) for packages that got worse:
+- **Release suggestions.** The comment also includes the [release suggestions](output.md#suggest) for packages that got worse:
   the nearest newer version that restores the wheels, or the last older version that had them. Lookups are limited to
   packages known to come from PyPI. If a lookup fails, the comment still reports the gap and the check's result is unchanged.
 - **Permissions.** Commenting needs `pull-requests: write` for the token (`github-token`, by default the workflow's
