@@ -228,8 +228,8 @@ project's release list from PyPI, which is one more request, and is left out
 when there's no gap, when `WHEELGAP_INDEX_URL` points at another index (which
 may hold private names), or when that lookup fails.
 
-To check what a package installs as well as the package
-itself, as [`--deps`](cli.md#deps) does, pass `dependencies: true`:
+To check what a package installs as well as the package itself, as [`--deps`](cli.md#deps) does, pass
+`dependencies: true`:
 
 > Can I install mcp 2.3.0 on Windows on ARM?
 

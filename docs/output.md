@@ -54,6 +54,12 @@ different `-p` versions is one row per release, and the summary still counts the
 gaps on each target that has any (`musl-aarch64  1 from source, 1 missing`). Packages that weren't checked, such as
 editable, path or Git dependencies, are listed on the `skipped` line.
 
+A package that's only there because something else needs it names the direct dependency that pulls it in, from
+`uv.lock`, Poetry 1.x lockfiles or [`--deps`](cli.md#deps): `cryptography (via mcp)`, or `cryptography (via mcp +2)`
+when three of your direct dependencies lead to it. It names a dependency only when the lockfile shows that one really
+leads there on that target, so a package reached through another package's optional extra may have no hint.
+`--explain` gives the full path (`via: mcp → PyJWT → cryptography`); `--json` and quiet output keep the bare name.
+
 With `-q` / `--quiet` (or `quiet = true`), only the summary and the names of the packages with gaps are printed:
 
 ```text
@@ -88,8 +94,10 @@ uvloop 0.21.0 on win-arm64: ● source
 Other inputs have no dependency graph, so they show no path. If you think wheelgap got a package wrong, this output
 (or `--json --explain`) is all a bug report needs, with no need to share your lockfile.
 
-When the package comes from PyPI and publishes an issue tracker in its metadata (or a GitHub repository
-fallback), each gap line also links to it so you can ask the maintainers for a wheel:
+When the package comes from PyPI and publishes an issue tracker in its metadata (or a GitHub repository fallback),
+each gap line also links to it so you can ask the maintainers for a wheel. Its `project_urls` labels are read the way
+PyPI reads its well-known labels ([PEP 753](https://peps.python.org/pep-0753/)), so `Issues`, `Issue-Tracker`,
+`bug_tracker` and `GitHub: issues` all count:
 
 ```text
 armlib 1.4.0 on musl-aarch64: ● source
